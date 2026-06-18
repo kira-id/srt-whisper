@@ -88,6 +88,9 @@
             <button type="submit" class="btn btn-primary w-100" id="submitBtn">
                 <span id="btnText">Generate SRT Subtitles</span>
             </button>
+            <button type="button" class="btn btn-danger w-100 mt-2" id="cancelBtn" style="display: none;">
+                Cancel Processing
+            </button>
         </form>
         
         <div class="progress-container" id="progressContainer">
@@ -131,8 +134,11 @@
         const errorContainer = document.getElementById('errorContainer');
         const modelInfo = document.getElementById('modelInfo');
         const submitBtn = document.getElementById('submitBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
         const btnText = document.getElementById('btnText');
-
+        let progressInterval = null;
+        let currentController = null;
+        
         dropArea.addEventListener('click', () => fileInput.click());
         
         dropArea.addEventListener('dragover', (e) => {
@@ -166,33 +172,42 @@
 
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             if (!fileInput.files.length) {
                 showError('Please select a file first.');
                 return;
             }
-            
+
             progressContainer.style.display = 'block';
             resultContainer.style.display = 'none';
             errorContainer.style.display = 'none';
             submitBtn.disabled = true;
+            submitBtn.style.display = 'none';
+            cancelBtn.style.display = 'block';
+            cancelBtn.disabled = false;
             btnText.textContent = 'Processing...';
             modelInfo.style.display = 'block';
-            
+
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
             formData.append('model_size', document.getElementById('modelSize').value);
             formData.append('language', document.getElementById('language').value);
-            
-            simulateProgress();
-            
+
+            progressInterval = simulateProgress();
+            currentController = new AbortController();
+
             try {
                 const response = await fetch('/transcribe', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: currentController.signal,
                 });
-                
-                if (response.ok) {
+
+                const data = await response.json().catch(() => ({}));
+
+                if (data.status === 'cancelled') {
+                    showError('Processing cancelled by user.');
+                } else if (response.ok) {
                     const blob = await response.blob();
                     const url = URL.createObjectURL(blob);
                     downloadLink.href = url;
@@ -203,16 +218,49 @@
                     }
                     progressContainer.style.display = 'none';
                     resultContainer.style.display = 'block';
-                    submitBtn.disabled = false;
-                    btnText.textContent = 'Generate SRT Subtitles';
                 } else {
-                    const error = await response.json();
-                    showError(error.error || 'Processing failed.');
+                    const error = data.error || 'Processing failed.';
+                    showError(error);
                 }
             } catch (err) {
-                showError('Network error: ' + err.message);
+                if (err.name === 'AbortError') {
+                    showError('Processing cancelled by user.');
+                } else {
+                    showError('Network error: ' + err.message);
+                }
+            } finally {
+                resetUI();
             }
         });
+
+        cancelBtn.addEventListener('click', async () => {
+            if (currentController) {
+                currentController.abort();
+            }
+            cancelBtn.disabled = true;
+            try {
+                await fetch('/cancel', { method: 'POST' });
+            } catch (e) {
+                // ignore
+            }
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+        });
+
+        function resetUI() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            currentController = null;
+            submitBtn.disabled = false;
+            submitBtn.style.display = '';
+            cancelBtn.style.display = 'none';
+            cancelBtn.disabled = false;
+            btnText.textContent = 'Generate SRT Subtitles';
+        }
 
         function simulateProgress() {
             let progress = 0;
@@ -220,22 +268,22 @@
                 'Extracting audio...',
                 'Loading model...',
                 'Transcribing audio...',
-                'Generating SRT file...'
+                'Generating SRT file...',
             ];
             let stageIndex = 0;
-            
+
             const interval = setInterval(() => {
                 progress += Math.random() * 15;
                 if (progress >= 90) progress = 90;
-                
+
                 progressBar.style.width = progress + '%';
-                
+
                 if (progress > (stageIndex + 1) * 22 && stageIndex < stages.length - 1) {
                     stageIndex++;
                     progressText.textContent = stages[stageIndex];
                 }
             }, 500);
-            
+
             return interval;
         }
 
@@ -243,8 +291,6 @@
             errorContainer.textContent = message;
             errorContainer.style.display = 'block';
             progressContainer.style.display = 'none';
-            submitBtn.disabled = false;
-            btnText.textContent = 'Generate SRT Subtitles';
         }
     </script>
 </body>
