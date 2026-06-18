@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video to SRT Subtitle Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container { max-width: 800px; margin-top: 50px; }
+        .progress-container { display: none; margin-top: 20px; }
+        .result-container { display: none; margin-top: 20px; }
+        .drop-area {
+            border: 3px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .drop-area:hover {
+            border-color: #0d6efd;
+            background-color: #f8f9fa;
+        }
+        .drop-area.active {
+            border-color: #0d6efd;
+            background-color: #e7f1ff;
+        }
+        .file-info {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        #progressBar {
+            height: 25px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">Video/Audio to SRT Subtitle Generator</h1>
+        
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="fileInput" class="form-label">Select File (Video/Audio)</label>
+                <div class="drop-area" id="dropArea">
+                    <i class="bi bi-upload" style="font-size: 3rem;"></i>
+                    <p class="mb-0">Click or drag file here</p>
+                    <p class="file-info">Supported: MP4, AVI, MOV, MKV, MP3, WAV, FLAC, OGG, M4A, AAC</p>
+                    <input type="file" id="fileInput" name="file" accept=".mp4,.avi,.mov,.mkv,.webm,.mp3,.wav,.flac,.ogg,.m4a,.aac" style="display: none;">
+                </div>
+                <div id="selectedFile" class="mt-2"></div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="modelSize" class="form-label">Model Size</label>
+                <select class="form-select" id="modelSize" name="model_size">
+                    <option value="tiny">Tiny (fastest, least accurate)</option>
+                    <option value="tiny.en">Tiny English</option>
+                    <option value="base">Base</option>
+                    <option value="base.en">Base English</option>
+                    <option value="small">Small</option>
+                    <option value="small.en">Small English</option>
+                    <option value="medium" selected>Medium (default, good balance)</option>
+                    <option value="medium.en">Medium English</option>
+                    <option value="large-v1">Large v1</option>
+                    <option value="large-v2">Large v2</option>
+                    <option value="large-v3">Large v3 (most accurate)</option>
+                </select>
+            </div>
+            
+            <div class="mb-3">
+                <label for="language" class="form-label">Language</label>
+                <select class="form-select" id="language" name="language">
+                    <option value="id" selected>Indonesian</option>
+                    <option value="auto">Auto Detect</option>
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="ja">Japanese</option>
+                    <option value="ko">Korean</option>
+                    <option value="zh">Chinese</option>
+                    <option value="ar">Arabic</option>
+                    <option value="ru">Russian</option>
+                </select>
+            </div>
+            
+            <button type="submit" class="btn btn-primary w-100" id="submitBtn">
+                <span id="btnText">Generate SRT Subtitles</span>
+            </button>
+        </form>
+        
+        <div class="progress-container" id="progressContainer">
+            <h5>Processing... Please wait</h5>
+            <div class="progress mb-2">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" style="width: 0%"></div>
+            </div>
+            <p id="progressText" class="text-muted">Initializing...</p>
+            <div class="alert alert-info" id="modelInfo" style="display: none;">
+                First run will download model (~1-4GB depending on size)
+            </div>
+        </div>
+        
+        <div class="result-container" id="resultContainer">
+            <div class="alert alert-success">
+                <h5>Success! SRT file generated.</h5>
+                <p id="detectedLanguage" class="mb-0"></p>
+            </div>
+            <a id="downloadLink" class="btn btn-success w-100" href="#" download>
+                <i class="bi bi-download"></i> Download SRT File
+            </a>
+        </div>
+        
+        <div id="errorContainer" class="alert alert-danger" style="display: none; margin-top: 20px;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <script>
+        const dropArea = document.getElementById('dropArea');
+        const fileInput = document.getElementById('fileInput');
+        const selectedFile = document.getElementById('selectedFile');
+        const uploadForm = document.getElementById('uploadForm');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const resultContainer = document.getElementById('resultContainer');
+        const downloadLink = document.getElementById('downloadLink');
+        const errorContainer = document.getElementById('errorContainer');
+        const modelInfo = document.getElementById('modelInfo');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+
+        dropArea.addEventListener('click', () => fileInput.click());
+        
+        dropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropArea.classList.add('active');
+        });
+        
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.classList.remove('active');
+        });
+        
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('active');
+            fileInput.files = e.dataTransfer.files;
+            showFileInfo();
+        });
+        
+        fileInput.addEventListener('change', showFileInfo);
+        
+        function showFileInfo() {
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                selectedFile.innerHTML = `
+                    <div class="alert alert-info">
+                        <strong>Selected:</strong> ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)
+                    </div>
+                `;
+            }
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!fileInput.files.length) {
+                showError('Please select a file first.');
+                return;
+            }
+            
+            progressContainer.style.display = 'block';
+            resultContainer.style.display = 'none';
+            errorContainer.style.display = 'none';
+            submitBtn.disabled = true;
+            btnText.textContent = 'Processing...';
+            modelInfo.style.display = 'block';
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('model_size', document.getElementById('modelSize').value);
+            formData.append('language', document.getElementById('language').value);
+            
+            simulateProgress();
+            
+            try {
+                const response = await fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    downloadLink.href = url;
+                    downloadLink.download = fileInput.files[0].name.replace(/\.[^/.]+$/, '.srt');
+                    const detectedLang = response.headers.get('X-Detected-Language');
+                    if (detectedLang) {
+                        detectedLanguage.textContent = `Detected language: ${detectedLang}`;
+                    }
+                    progressContainer.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    submitBtn.disabled = false;
+                    btnText.textContent = 'Generate SRT Subtitles';
+                } else {
+                    const error = await response.json();
+                    showError(error.error || 'Processing failed.');
+                }
+            } catch (err) {
+                showError('Network error: ' + err.message);
+            }
+        });
+
+        function simulateProgress() {
+            let progress = 0;
+            const stages = [
+                'Extracting audio...',
+                'Loading model...',
+                'Transcribing audio...',
+                'Generating SRT file...'
+            ];
+            let stageIndex = 0;
+            
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress >= 90) progress = 90;
+                
+                progressBar.style.width = progress + '%';
+                
+                if (progress > (stageIndex + 1) * 22 && stageIndex < stages.length - 1) {
+                    stageIndex++;
+                    progressText.textContent = stages[stageIndex];
+                }
+            }, 500);
+            
+            return interval;
+        }
+
+        function showError(message) {
+            errorContainer.textContent = message;
+            errorContainer.style.display = 'block';
+            progressContainer.style.display = 'none';
+            submitBtn.disabled = false;
+            btnText.textContent = 'Generate SRT Subtitles';
+        }
+    </script>
+</body>
+</html>
