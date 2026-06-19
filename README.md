@@ -35,6 +35,18 @@ python main.py
 - VAD (Voice Activity Detection) is enabled for better segmentation
 - Word timestamps enabled for detailed, word-per-word subtitles
 
+## Jetson Orin Setup
+
+Install PyTorch from NVIDIA's L4T repo to get CUDA support:
+
+```bash
+pip install torch torchvision --extra-index-url https://developer.download.nvidia.com/Compute/JP6.0/rev4.0
+```
+Replace with your JetPack version (e.g. `JP5.1/rev3.0`). Verify with:
+```bash
+python3 -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
 ## Model Cache
 
 Downloaded models are stored in `model_cache/` and excluded from git via `.gitignore`.
