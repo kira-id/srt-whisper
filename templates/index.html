@@ -138,6 +138,7 @@
         let progressInterval = null;
         let currentController = null;
         let pollingForExisting = false;
+        let currentSrtUrl = null;
 
         async function checkStatus() {
             try {
@@ -162,6 +163,16 @@
                     modelInfo.style.display = 'block';
                     progressInterval = simulateProgress();
                     pollForResult();
+                } else if (data.download_available) {
+                    const detectedLang = data.detected_language || 'unknown';
+                    detectedLanguage.textContent = `Detected language: ${detectedLang}`;
+                    downloadLink.href = '/download';
+                    downloadLink.download = (data.original_filename || 'subtitles').replace(/\\.[^/.]+$/, '.srt');
+                    progressContainer.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    errorContainer.style.display = 'none';
+                    submitBtn.disabled = false;
+                    submitBtn.style.display = '';
                 }
             } catch (e) {
                 console.error('Failed to check status', e);
@@ -176,21 +187,26 @@
                 try {
                     const res = await fetch('/status');
                     const data = await res.json();
-                    if (!data.is_processing) {
-                        if (pollingForExisting) {
-                            errorContainer.innerHTML = '<strong>Ready</strong> - Previous processing completed. You can now select and upload your file.';
-                            errorContainer.className = 'alert alert-success';
-                            errorContainer.style.display = 'block';
+                        if (!data.is_processing) {
+                            if (pollingForExisting) {
+                                errorContainer.innerHTML = '<strong>Ready</strong> - Previous processing completed. You can now select and upload your file.';
+                                errorContainer.className = 'alert alert-success';
+                                errorContainer.style.display = 'block';
+                            }
                             progressContainer.style.display = 'none';
                             cancelBtn.style.display = 'none';
                             submitBtn.disabled = false;
                             submitBtn.style.display = '';
                             pollingForExisting = false;
-                        } else {
-                            resetUI();
+                            if (data.download_available) {
+                                const detectedLang = data.detected_language || 'unknown';
+                                detectedLanguage.textContent = `Detected language: ${detectedLang}`;
+                                downloadLink.href = '/download';
+                                downloadLink.download = (data.original_filename || 'subtitles').replace(/\\.[^/.]+$/, '.srt');
+                                resultContainer.style.display = 'block';
+                                errorContainer.style.display = 'none';
+                            }
                         }
-                        return;
-                    }
                 } catch (e) {
                     console.error('Poll failed', e);
                 }
@@ -266,24 +282,33 @@
                     signal: currentController.signal,
                 });
 
-                const data = await response.json().catch(() => ({}));
+                const contentType = response.headers.get('content-type') || '';
 
-                if (data.status === 'cancelled') {
-                    showError('Processing cancelled by user.');
+                let srtUrl = null;
+                if (currentSrtUrl) {
+                    URL.revokeObjectURL(currentSrtUrl);
+                }
+
+                if (contentType.includes('application/json')) {
+                    const data = await response.json();
+                    if (data.status === 'cancelled') {
+                        showError('Processing cancelled by user.');
+                    } else {
+                        showError(data.error || 'Processing failed.');
+                    }
                 } else if (response.ok) {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    downloadLink.href = url;
-                    downloadLink.download = fileInput.files[0].name.replace(/\.[^/.]+$/, '.srt');
                     const detectedLang = response.headers.get('X-Detected-Language');
+                    const blob = await response.blob();
+                    currentSrtUrl = URL.createObjectURL(blob);
+                    downloadLink.href = currentSrtUrl;
+                    downloadLink.download = fileInput.files[0].name.replace(/\.[^/.]+$/, '.srt');
                     if (detectedLang) {
                         detectedLanguage.textContent = `Detected language: ${detectedLang}`;
                     }
                     progressContainer.style.display = 'none';
                     resultContainer.style.display = 'block';
                 } else {
-                    const error = data.error || 'Processing failed.';
-                    showError(error);
+                    showError('Processing failed.');
                 }
             } catch (err) {
                 if (err.name === 'AbortError') {

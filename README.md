@@ -40,8 +40,9 @@ python main.py
 Install PyTorch from NVIDIA's L4T repo to get CUDA support:
 
 ```bash
-pip install torch torchvision --extra-index-url https://developer.download.nvidia.com/Compute/JP6.0/rev4.0
-```
+pip install torch torchvision torchaudio \
+  --index-url https://pypi.jetson-ai-lab.io/jp6/cu126```
+
 Replace with your JetPack version (e.g. `JP5.1/rev3.0`). Verify with:
 ```bash
 python3 -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"

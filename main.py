@@ -28,6 +28,10 @@ processing_filename = None
 processing_model_size = None
 processing_language = None
 processing_start_time = None
+last_srt_path = None
+last_original_filename = None
+last_detected_lang = None
+last_srt_lock = threading.Lock()
 
 
 def format_timestamp(seconds: float) -> str:
@@ -128,15 +132,21 @@ async def index(request: Request):
 @app.get("/status")
 async def status():
     with processing_lock:
-        return JSONResponse(
-            {
-                "is_processing": is_processing,
-                "filename": processing_filename,
-                "model_size": processing_model_size,
-                "language": processing_language,
-                "start_time": processing_start_time,
-            }
-        )
+        status_data = {
+            "is_processing": is_processing,
+            "filename": processing_filename,
+            "model_size": processing_model_size,
+            "language": processing_language,
+            "start_time": processing_start_time,
+        }
+    with last_srt_lock:
+        if not is_processing and last_srt_path:
+            status_data["download_available"] = True
+            status_data["original_filename"] = last_original_filename
+            status_data["detected_language"] = last_detected_lang
+        else:
+            status_data["download_available"] = False
+    return JSONResponse(status_data)
 
 
 @app.post("/cancel")
@@ -150,6 +160,22 @@ async def cancel():
         processing_language = None
         processing_start_time = None
     return JSONResponse({"status": "cancelled"})
+
+
+@app.get("/download")
+async def download_result():
+    global last_srt_path, last_original_filename, last_detected_lang
+    with last_srt_lock:
+        if not last_srt_path or not os.path.exists(last_srt_path):
+            return JSONResponse({"error": "No completed result available."}, status_code=404)
+        filename = f"{Path(last_original_filename).stem}.srt"
+        detected_lang = last_detected_lang or "unknown"
+    return FileResponse(
+        last_srt_path,
+        media_type="application/octet-stream",
+        filename=filename,
+        headers={"X-Detected-Language": detected_lang},
+    )
 
 
 @app.post("/transcribe")
@@ -212,6 +238,12 @@ async def transcribe(
             return JSONResponse({"status": "cancelled"}, status_code=200)
 
         detected_lang = info.language if info.language else "unknown"
+
+        with last_srt_lock:
+            global last_srt_path, last_original_filename, last_detected_lang
+            last_srt_path = srt_path
+            last_original_filename = file.filename
+            last_detected_lang = detected_lang
 
         return FileResponse(
             srt_path,
