@@ -60,7 +60,7 @@ def segments_to_srt(segments) -> str:
     return "\n".join(srt_content)
 
 
-def get_model(model_size: str, device: str = "cuda"):
+def get_model(model_size: str, device: str = "cpu"):
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
     compute_type = (
