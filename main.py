@@ -1,5 +1,6 @@
 import os
 import tempfile
+import datetime
 import asyncio
 import threading
 from pathlib import Path
@@ -8,12 +9,11 @@ import ffmpeg
 import torch
 from fastapi import FastAPI, Form, File, UploadFile, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+
 from fastapi.templating import Jinja2Templates
 from faster_whisper import WhisperModel
 
 app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.cache = None
 
@@ -24,6 +24,10 @@ model_cache = {}
 processing_lock = threading.Lock()
 cancel_event = threading.Event()
 is_processing = False
+processing_filename = None
+processing_model_size = None
+processing_language = None
+processing_start_time = None
 
 
 def format_timestamp(seconds: float) -> str:
@@ -53,13 +57,17 @@ def segments_to_srt(segments) -> str:
 
 
 def get_model(model_size: str, device: str = "cuda"):
+    if device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+    compute_type = (
+        "float16" if device == "cuda" else "int8" if device == "cpu" else "float32"
+    )
     cache_key = f"{model_size}_{device}"
     if cache_key not in model_cache:
-        if device == "cuda" and not torch.cuda.is_available():
-            device = "cpu"
         model_cache[cache_key] = WhisperModel(
             model_size,
             device=device,
+            compute_type=compute_type,
             download_root=MODEL_CACHE_DIR,
             local_files_only=False,
         )
@@ -117,12 +125,30 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {"request": request})
 
 
+@app.get("/status")
+async def status():
+    with processing_lock:
+        return JSONResponse(
+            {
+                "is_processing": is_processing,
+                "filename": processing_filename,
+                "model_size": processing_model_size,
+                "language": processing_language,
+                "start_time": processing_start_time,
+            }
+        )
+
+
 @app.post("/cancel")
 async def cancel():
-    global is_processing
+    global is_processing, processing_filename, processing_model_size, processing_language, processing_start_time
     cancel_event.set()
     with processing_lock:
         is_processing = False
+        processing_filename = None
+        processing_model_size = None
+        processing_language = None
+        processing_start_time = None
     return JSONResponse({"status": "cancelled"})
 
 
@@ -130,9 +156,9 @@ async def cancel():
 async def transcribe(
     file: UploadFile = File(...),
     model_size: str = Form(default="medium"),
-    language: str = Form(default="id"),
+    language: str = Form(default="auto"),
 ):
-    global is_processing
+    global is_processing, processing_filename, processing_model_size, processing_language, processing_start_time
 
     if language == "auto":
         language = None
@@ -153,6 +179,10 @@ async def transcribe(
                 status_code=409,
             )
         is_processing = True
+        processing_filename = file.filename
+        processing_model_size = model_size
+        processing_language = language
+        processing_start_time = datetime.datetime.now().isoformat()
         cancel_event.clear()
 
     temp_dir = tempfile.mkdtemp()
@@ -192,6 +222,10 @@ async def transcribe(
     finally:
         with processing_lock:
             is_processing = False
+            processing_filename = None
+            processing_model_size = None
+            processing_language = None
+            processing_start_time = None
             cancel_event.clear()
 
 

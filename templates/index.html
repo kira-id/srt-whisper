@@ -71,8 +71,7 @@
             <div class="mb-3">
                 <label for="language" class="form-label">Language</label>
                 <select class="form-select" id="language" name="language">
-                    <option value="id" selected>Indonesian</option>
-                    <option value="auto">Auto Detect</option>
+                    <option value="auto" selected>Auto Detect</option>
                     <option value="en">English</option>
                     <option value="es">Spanish</option>
                     <option value="fr">French</option>
@@ -121,7 +120,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     
-    <script>
+<script>
         const dropArea = document.getElementById('dropArea');
         const fileInput = document.getElementById('fileInput');
         const selectedFile = document.getElementById('selectedFile');
@@ -138,27 +137,91 @@
         const btnText = document.getElementById('btnText');
         let progressInterval = null;
         let currentController = null;
-        
+        let pollingForExisting = false;
+
+        async function checkStatus() {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+                if (data.is_processing) {
+                    pollingForExisting = true;
+                    selectedFile.innerHTML = `
+                        <div class="alert alert-warning">
+                            <strong>Processing in progress:</strong> ${data.filename || 'Unknown file'}<br>
+                            <small>Model: ${data.model_size || 'medium'} | Language: ${data.language === null ? 'Auto Detect' : data.language || 'auto'}</small>
+                            ${data.start_time ? `<br><small>Started: ${new Date(data.start_time).toLocaleTimeString()}</small>` : ''}
+                        </div>
+                    `;
+                    submitBtn.disabled = true;
+                    submitBtn.style.display = 'none';
+                    cancelBtn.style.display = 'block';
+                    cancelBtn.disabled = false;
+                    progressContainer.style.display = 'block';
+                    progressBar.style.width = '45%';
+                    progressText.textContent = 'Resuming from existing process...';
+                    modelInfo.style.display = 'block';
+                    progressInterval = simulateProgress();
+                    pollForResult();
+                }
+            } catch (e) {
+                console.error('Failed to check status', e);
+            }
+        }
+
+        async function pollForResult() {
+            const maxPolls = 1800;
+            let polls = 0;
+            while (polls < maxPolls) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const res = await fetch('/status');
+                    const data = await res.json();
+                    if (!data.is_processing) {
+                        if (pollingForExisting) {
+                            errorContainer.innerHTML = '<strong>Ready</strong> - Previous processing completed. You can now select and upload your file.';
+                            errorContainer.className = 'alert alert-success';
+                            errorContainer.style.display = 'block';
+                            progressContainer.style.display = 'none';
+                            cancelBtn.style.display = 'none';
+                            submitBtn.disabled = false;
+                            submitBtn.style.display = '';
+                            pollingForExisting = false;
+                        } else {
+                            resetUI();
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Poll failed', e);
+                }
+                polls++;
+            }
+            showError('Processing timeout. Please try again.');
+            resetUI();
+        }
+
         dropArea.addEventListener('click', () => fileInput.click());
         
+        checkStatus();
+
         dropArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropArea.classList.add('active');
         });
-        
+
         dropArea.addEventListener('dragleave', () => {
             dropArea.classList.remove('active');
         });
-        
+
         dropArea.addEventListener('drop', (e) => {
             e.preventDefault();
             dropArea.classList.remove('active');
             fileInput.files = e.dataTransfer.files;
             showFileInfo();
         });
-        
+
         fileInput.addEventListener('change', showFileInfo);
-        
+
         function showFileInfo() {
             if (fileInput.files.length > 0) {
                 const file = fileInput.files[0];
