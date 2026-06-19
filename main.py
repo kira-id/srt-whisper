@@ -66,6 +66,7 @@ def get_model(model_size: str, device: str = "cuda"):
     compute_type = (
         "float16" if device == "cuda" else "int8" if device == "cpu" else "float32"
     )
+    print(f"[srt-whisper] Using device: {device}, compute_type: {compute_type}, model: {model_size}")
     cache_key = f"{model_size}_{device}"
     if cache_key not in model_cache:
         model_cache[cache_key] = WhisperModel(
